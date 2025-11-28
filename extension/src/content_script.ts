@@ -30,6 +30,7 @@
 interface ContentExtensionSettings {
     targetUrl?: string;
     clickSelector?: string;
+    stopSelector?: string;
     cameraActive?: boolean;
 }
 
@@ -98,8 +99,10 @@ class ExtensionGestureDetector {
 
     private async loadSettings(): Promise<void> {
         try {
-            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'cameraActive']);
+            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector', 'cameraActive']);
+            console.log('Loaded settings from storage:', result);
             this.settings = result as ContentExtensionSettings;
+            console.log('Settings applied to this.settings:', this.settings);
             
             if (this.settings.cameraActive) {
                 this.startCamera();
@@ -169,7 +172,7 @@ class ExtensionGestureDetector {
         }
     }
 
-    private handleHandDetectionResults(results: HandDetectionResult): void {
+    private async handleHandDetectionResults(results: HandDetectionResult): Promise<void> {
         console.log('Received hand detection results in content script:', {
             handCount: results.hands ? results.hands.length : 0,
             timestamp: results.timestamp,
@@ -211,7 +214,7 @@ class ExtensionGestureDetector {
                 if (gesture) {
                     console.log('Gesture detected in content script:', gesture);
                     this.displayGesture(gesture, handedness);
-                    this.executeGestureAction(gesture);
+                    await this.executeGestureAction(gesture);
                 }
             } else {
                 console.warn('Invalid landmarks data for hand', i + 1);
@@ -552,21 +555,56 @@ class ExtensionGestureDetector {
         return fingers;
     }
 
-    private executeGestureAction(gesture: string): void {
+    private async executeGestureAction(gesture: string): Promise<void> {
+        console.log('Executing gesture action:', gesture);
+        
+        // 設定を再読み込みして最新の値を取得
+        await this.loadSettings();
+        
+        console.log('Current settings:', this.settings);
+        console.log('Current URL:', window.location.href);
+        
         switch (gesture) {
             case '手を挙げました':
                 // URL遷移アクション
                 if (this.settings.targetUrl) {
-                    window.location.href = this.settings.targetUrl;
+                    console.log('Target URL:', this.settings.targetUrl);
+                    
+                    // URLの判定ロジック
+                    const currentUrl = window.location.href;
+                    const targetUrl = this.settings.targetUrl;
+                    const shouldNavigate = this.shouldNavigateToUrl(currentUrl, targetUrl);
+                    
+                    if (shouldNavigate) {
+                        console.log('Navigating to target URL');
+                        window.location.href = targetUrl;
+                    } else {
+                        console.log('Already on target domain/URL, checking for click action');
+                        // 同じドメイン/URLの場合、セレクタがあればクリック実行
+                        if (this.settings.clickSelector) {
+                            console.log('Executing click action');
+                            this.executeClickAction();
+                        } else {
+                            console.log('No click selector configured');
+                        }
+                    }
+                } else {
+                    console.log('No target URL configured');
                 }
                 break;
             case '人差し指を上げました':
                 // クリックアクション
+                console.log('Executing click action for index finger');
                 this.executeClickAction();
                 break;
             case '親指を上げました':
-                // その他のアクション（将来の拡張用）
-                console.log('親指を上げるジェスチャーを検知');
+                // 音声停止アクション
+                if (this.settings.stopSelector) {
+                    console.log('Executing stop action');
+                    this.executeStopAction();
+                } else {
+                    console.log('No stop selector configured');
+                }
                 break;
         }
     }
@@ -583,6 +621,52 @@ class ExtensionGestureDetector {
             }
         } catch (error) {
             console.error('クリックアクションの実行に失敗:', error);
+        }
+    }
+
+    private executeStopAction(): void {
+        if (!this.settings.stopSelector) return;
+
+        try {
+            const elements = document.querySelectorAll(this.settings.stopSelector);
+            if (elements.length > 0) {
+                const element = elements[0] as HTMLElement;
+                element.click();
+                console.log(`音声停止要素をクリックしました: ${this.settings.stopSelector}`);
+            }
+        } catch (error) {
+            console.error('音声停止アクションの実行に失敗:', error);
+        }
+    }
+
+    private shouldNavigateToUrl(currentUrl: string, targetUrl: string): boolean {
+        try {
+            const current = new URL(currentUrl);
+            const target = new URL(targetUrl);
+            
+            console.log('URL comparison:', {
+                currentDomain: current.hostname,
+                targetDomain: target.hostname,
+                currentPath: current.pathname,
+                targetPath: target.pathname
+            });
+            
+            // ChatGPTのドメインの場合は、ドメインが同じであれば遷移しない
+            if (target.hostname === 'chatgpt.com' || target.hostname === 'chat.openai.com') {
+                const sameDomain = current.hostname === target.hostname;
+                console.log('ChatGPT domain detected, same domain:', sameDomain);
+                return !sameDomain; // 同じドメインの場合は遷移しない
+            }
+            
+            // その他のサイトの場合は完全なURLマッチで判定
+            const sameUrl = currentUrl === targetUrl;
+            console.log('Non-ChatGPT domain, same URL:', sameUrl);
+            return !sameUrl; // 同じURLの場合は遷移しない
+            
+        } catch (error) {
+            console.error('URL parsing error:', error);
+            // URLの解析に失敗した場合は文字列比較にフォールバック
+            return currentUrl !== targetUrl;
         }
     }
 

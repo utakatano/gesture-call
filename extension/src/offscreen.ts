@@ -70,9 +70,10 @@ class OffscreenHandDetector {
 
             this.hands.setOptions({
                 maxNumHands: 2,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.3
+                modelComplexity: 1,         // 高精度モデル使用
+                minDetectionConfidence: 0.7, // 検知信頼度を高く設定（0.5→0.7）
+                minTrackingConfidence: 0.6,  // 追跡信頼度を高く設定（0.3→0.6）
+                staticImageMode: false       // 動画モードを明示的に設定
             });
 
             this.hands.onResults((results: HandResults) => {
@@ -137,10 +138,12 @@ class OffscreenHandDetector {
     }
 
     private sendDetectionResults(results: HandResults): void {
-        // 検知結果をContent Scriptに転送（Background Script経由）
+        // 検知結果をフィルタリングして精度を向上
+        const filteredResults = this.filterHandResults(results);
+        
         const processedResults = {
-            hands: results.multiHandLandmarks || [],
-            handedness: results.multiHandedness || [],
+            hands: filteredResults.hands,
+            handedness: filteredResults.handedness,
             timestamp: Date.now()
         };
 
@@ -240,6 +243,93 @@ class OffscreenHandDetector {
         }
 
         return fingers;
+    }
+
+    private filterHandResults(results: HandResults): { hands: Landmark[][], handedness: any[] } {
+        if (!results.multiHandLandmarks || !results.multiHandedness) {
+            return { hands: [], handedness: [] };
+        }
+
+        const filteredHands: Landmark[][] = [];
+        const filteredHandedness: any[] = [];
+
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+            const landmarks = results.multiHandLandmarks[i];
+            const handedness = results.multiHandedness[i];
+
+            // フィルタリング条件
+            if (this.isValidHandDetection(landmarks, handedness)) {
+                filteredHands.push(landmarks);
+                filteredHandedness.push(handedness);
+            } else {
+                console.log(`Hand ${i + 1} filtered out - low confidence or invalid landmarks`);
+            }
+        }
+
+        console.log(`Filtered ${results.multiHandLandmarks.length} → ${filteredHands.length} hands`);
+        return { hands: filteredHands, handedness: filteredHandedness };
+    }
+
+    private isValidHandDetection(landmarks: Landmark[], handedness: any): boolean {
+        // 1. ランドマークの数をチェック（正確に21個の手のランドマークポイントが必要）
+        if (!landmarks || landmarks.length !== 21) {
+            return false;
+        }
+
+        // 2. 手の信頼度をチェック
+        if (handedness && handedness.score < 0.7) { // 信頼度70%未満は除外
+            return false;
+        }
+
+        // 3. ランドマークの位置が画面内にあることを確認
+        for (const landmark of landmarks) {
+            if (landmark.x < 0 || landmark.x > 1 || landmark.y < 0 || landmark.y > 1) {
+                return false;
+            }
+        }
+
+        // 4. 手のサイズが適切かチェック（手首から中指先端の距離）
+        const wrist = landmarks[0];        // 手首
+        const middleTip = landmarks[12];   // 中指先端
+        const handSize = Math.sqrt(
+            Math.pow(middleTip.x - wrist.x, 2) + 
+            Math.pow(middleTip.y - wrist.y, 2)
+        );
+
+        // 手のサイズが極端に小さい（ノイズ）または大きい（顔の誤検知）場合を除外
+        if (handSize < 0.05 || handSize > 0.4) {
+            console.log('Hand filtered out due to size:', handSize);
+            return false;
+        }
+
+        // 5. 手の形状が自然かチェック（指の関節の位置関係）
+        if (!this.isNaturalHandShape(landmarks)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private isNaturalHandShape(landmarks: Landmark[]): boolean {
+        // 基本的な手の形状チェック
+        // 手首から各指先への距離が適切な範囲内かチェック
+        const wrist = landmarks[0];
+        const fingerTips = [4, 8, 12, 16, 20]; // 各指の先端
+
+        for (const tipIndex of fingerTips) {
+            const tip = landmarks[tipIndex];
+            const distance = Math.sqrt(
+                Math.pow(tip.x - wrist.x, 2) + 
+                Math.pow(tip.y - wrist.y, 2)
+            );
+            
+            // 指が極端に短いまたは長い場合は不自然
+            if (distance < 0.03 || distance > 0.3) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

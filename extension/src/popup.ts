@@ -3,12 +3,14 @@
 interface PopupExtensionSettings {
     targetUrl: string;
     clickSelector: string;
+    stopSelector: string;
     cameraActive: boolean;
 }
 
 class PopupController {
     private targetUrlInput: HTMLInputElement;
     private clickSelectorInput: HTMLInputElement;
+    private stopSelectorInput: HTMLInputElement;
     private startCameraBtn: HTMLButtonElement;
     private stopCameraBtn: HTMLButtonElement;
     private cameraStatus: HTMLElement;
@@ -16,9 +18,10 @@ class PopupController {
     constructor() {
         this.targetUrlInput = document.getElementById('targetUrl') as HTMLInputElement;
         this.clickSelectorInput = document.getElementById('clickSelector') as HTMLInputElement;
+        this.stopSelectorInput = document.getElementById('stopSelector') as HTMLInputElement;
         this.startCameraBtn = document.getElementById('startCamera') as HTMLButtonElement;
         this.stopCameraBtn = document.getElementById('stopCamera') as HTMLButtonElement;
-        this.cameraStatus = document.getElementById('cameraStatus')!;
+        this.cameraStatus = document.getElementById('cameraStatus')!
 
         this.initialize();
     }
@@ -38,6 +41,7 @@ class PopupController {
         // URL・セレクタ入力の保存
         this.targetUrlInput.addEventListener('blur', () => this.saveSettings());
         this.clickSelectorInput.addEventListener('blur', () => this.saveSettings());
+        this.stopSelectorInput.addEventListener('blur', () => this.saveSettings());
 
         // カメラ制御ボタン
         this.startCameraBtn.addEventListener('click', () => this.startCamera());
@@ -46,10 +50,24 @@ class PopupController {
 
     private async loadSettings(): Promise<void> {
         try {
-            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector']);
+            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector']);
+            console.log('Popup loaded settings:', result);
             
-            this.targetUrlInput.value = result.targetUrl || '';
-            this.clickSelectorInput.value = result.clickSelector || '';
+            this.targetUrlInput.value = result.targetUrl || 'https://chatgpt.com/';
+            this.clickSelectorInput.value = result.clickSelector || 'button[aria-label=\'音声モードを開始する\']';
+            this.stopSelectorInput.value = result.stopSelector || 'button[aria-label=\'End voice mode\']';
+            
+            console.log('Input values set to:', {
+                targetUrl: this.targetUrlInput.value,
+                clickSelector: this.clickSelectorInput.value,
+                stopSelector: this.stopSelectorInput.value
+            });
+            
+            // 初期値が設定された場合は自動保存
+            if (!result.targetUrl || !result.clickSelector || !result.stopSelector) {
+                console.log('Setting initial values, saving...');
+                await this.saveSettings();
+            }
         } catch (error) {
             console.error('設定の読み込みに失敗:', error);
         }
@@ -59,10 +77,17 @@ class PopupController {
         try {
             const settings: Partial<PopupExtensionSettings> = {
                 targetUrl: this.targetUrlInput.value,
-                clickSelector: this.clickSelectorInput.value
+                clickSelector: this.clickSelectorInput.value,
+                stopSelector: this.stopSelectorInput.value
             };
 
+            console.log('Saving settings:', settings);
             await chrome.storage.sync.set(settings);
+            console.log('Settings saved successfully');
+            
+            // 保存後の確認
+            const saved = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector']);
+            console.log('Verified saved settings:', saved);
         } catch (error) {
             console.error('設定の保存に失敗:', error);
         }

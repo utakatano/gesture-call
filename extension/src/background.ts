@@ -115,18 +115,35 @@ async function handleHandDetectionResults(results: any, sender: chrome.runtime.M
     try {
         console.log('Forwarding hand detection results to content scripts:', results);
         
-        // アクティブなタブを取得してContent Scriptに結果を転送
-        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-        if (tabs.length > 0 && tabs[0].id) {
-            await chrome.tabs.sendMessage(tabs[0].id, {
-                action: 'handDetectionResults',
-                results: results
+        // 全ての通常のタブを取得してContent Scriptに結果を転送
+        const tabs = await chrome.tabs.query({});
+        const validTabs = tabs.filter(tab => tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://'));
+        
+        if (validTabs.length > 0) {
+            // 有効なタブすべてに結果を送信（カメラが有効なタブのみが応答する）
+            const sendPromises = validTabs.map(async (tab) => {
+                try {
+                    await chrome.tabs.sendMessage(tab.id!, {
+                        action: 'handDetectionResults',
+                        results: results
+                    });
+                    return { tabId: tab.id, success: true };
+                } catch (error) {
+                    // タブにContent Scriptが注入されていない場合は無視
+                    return { tabId: tab.id, success: false, error };
+                }
             });
-            console.log('Hand detection results forwarded to content script');
-            return { success: true };
+            
+            const sendResults = await Promise.allSettled(sendPromises);
+            const successCount = sendResults.filter(result => 
+                result.status === 'fulfilled' && result.value.success
+            ).length;
+            
+            console.log(`Hand detection results sent to ${successCount} tabs`);
+            return { success: true, tabsSent: successCount };
         } else {
-            console.warn('No active tab found to forward results');
-            return { success: false, error: 'No active tab' };
+            console.warn('No valid tabs found to forward results');
+            return { success: false, error: 'No valid tabs' };
         }
     } catch (error) {
         console.error('Failed to forward hand detection results:', error);
