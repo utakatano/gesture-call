@@ -238,6 +238,9 @@ class ExtensionGestureDetector {
             overflow: hidden;
             background-color: black;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            opacity: 0.2;
+            pointer-events: none;
+            transition: opacity 0.2s ease-in-out;
         `;
 
         // ビデオ要素を作成
@@ -283,6 +286,21 @@ class ExtensionGestureDetector {
         this.overlay.appendChild(this.video);
         this.overlay.appendChild(this.canvas);
         this.overlay.appendChild(this.gestureOutput);
+
+        // マウスホバーイベントリスナーを追加
+        this.overlay.addEventListener('mouseenter', () => {
+            if (this.overlay) {
+                this.overlay.style.opacity = '1.0';
+                this.overlay.style.pointerEvents = 'auto';
+            }
+        });
+
+        this.overlay.addEventListener('mouseleave', () => {
+            if (this.overlay) {
+                this.overlay.style.opacity = '0.2';
+                this.overlay.style.pointerEvents = 'none';
+            }
+        });
 
         // ページに追加
         document.body.appendChild(this.overlay);
@@ -683,6 +701,7 @@ class ExtensionGestureDetector {
             }
         }, 2000);
     }
+
 }
 
 // コンテンツスクリプトが読み込まれたら初期化
