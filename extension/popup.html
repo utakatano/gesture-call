@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Call</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 15px;
+            font-family: Arial, sans-serif;
+            margin: 0;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            margin: 0;
+            color: #333;
+        }
+        
+        .section {
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        
+        .section h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .input-group {
+            margin-bottom: 10px;
+        }
+        
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            margin-bottom: 3px;
+            color: #666;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 5px;
+            font-size: 12px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            box-sizing: border-box;
+        }
+        
+        .camera-controls {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 8px;
+            font-size: 12px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background-color: #007cba;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #005a87;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .status.active {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.inactive {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🖐️ Gesture Call</h1>
+    </div>
+    
+    <div class="section">
+        <h3>ページ操作設定</h3>
+        <div class="input-group">
+            <label for="targetUrl">遷移先URL:</label>
+            <input type="text" id="targetUrl" placeholder="https://example.com">
+        </div>
+        <div class="input-group">
+            <label for="clickSelector">クリック要素のセレクタ:</label>
+            <input type="text" id="clickSelector" placeholder=".button, #submit, button">
+        </div>
+    </div>
+    
+    <div class="section">
+        <h3>カメラ制御</h3>
+        <div class="camera-controls">
+            <button id="startCamera" class="btn btn-primary">開始</button>
+            <button id="stopCamera" class="btn btn-danger">停止</button>
+        </div>
+        <div id="cameraStatus" class="status inactive">
+            カメラ停止中
+        </div>
+    </div>
+
+    <script src="dist/src/popup.js"></script>
+</body>
+</html>

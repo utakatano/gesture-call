@@ -1,0 +1,613 @@
+// Chrome拡張機能のコンテンツスクリプト（オフスクリーン方式）
+
+// 名前空間の分離とエラー防止
+(function() {
+    'use strict';
+    
+    // MediaPipe関数の宣言とアクセス
+    let drawConnectors: any, drawLandmarks: any, HAND_CONNECTIONS: any;
+    
+    // MediaPipeライブラリが読み込まれるまで待機する関数
+    function waitForMediaPipe(): Promise<void> {
+        return new Promise((resolve) => {
+            const checkMediaPipe = () => {
+                const windowAny = window as any;
+                if (windowAny.drawConnectors && windowAny.drawLandmarks && windowAny.HAND_CONNECTIONS) {
+                    drawConnectors = windowAny.drawConnectors;
+                    drawLandmarks = windowAny.drawLandmarks;
+                    HAND_CONNECTIONS = windowAny.HAND_CONNECTIONS;
+                    console.log('MediaPipe drawing functions loaded successfully');
+                    resolve();
+                } else {
+                    console.log('MediaPipe functions not yet available, retrying in 100ms');
+                    setTimeout(checkMediaPipe, 100);
+                }
+            };
+            checkMediaPipe();
+        });
+    }
+
+interface ContentExtensionSettings {
+    targetUrl?: string;
+    clickSelector?: string;
+    cameraActive?: boolean;
+}
+
+interface HandDetectionResult {
+    hands: any[];
+    handedness: any[];
+    timestamp: number;
+}
+
+class ExtensionGestureDetector {
+    private video: HTMLVideoElement | null = null;
+    private canvas: HTMLCanvasElement | null = null;
+    private ctx: CanvasRenderingContext2D | null = null;
+    private overlay: HTMLElement | null = null;
+    private gestureOutput: HTMLElement | null = null;
+    private mediaStream: MediaStream | null = null;
+    private isActive = false;
+    private settings: ContentExtensionSettings = {};
+    private lastProcessTime = 0;
+    private readonly PROCESS_INTERVAL = 500; // 0.5秒間隔
+    private detectionTimer: number | null = null;
+
+    constructor() {
+        this.setupMessageListener();
+        this.loadSettings();
+        this.setupHandDetectionResultListener();
+        
+        // MediaPipeライブラリの読み込みを待機
+        waitForMediaPipe().then(() => {
+            console.log('ExtensionGestureDetector initialized with MediaPipe');
+        }).catch((error) => {
+            console.error('Failed to load MediaPipe functions:', error);
+        });
+    }
+
+    private setupMessageListener(): void {
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            switch (message.action) {
+                case 'startCamera':
+                    this.startCamera();
+                    sendResponse({ success: true });
+                    break;
+                case 'stopCamera':
+                    this.stopCamera();
+                    sendResponse({ success: true });
+                    break;
+                case 'handDetectionResults':
+                    this.handleHandDetectionResults(message.results);
+                    sendResponse({ success: true });
+                    break;
+                default:
+                    sendResponse({ success: false, error: 'Unknown action' });
+            }
+        });
+    }
+
+    private setupHandDetectionResultListener(): void {
+        // Background Scriptからの手の検知結果を受信
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (message.action === 'handDetectionResults') {
+                this.handleHandDetectionResults(message.results);
+                sendResponse({ success: true });
+            }
+        });
+    }
+
+    private async loadSettings(): Promise<void> {
+        try {
+            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'cameraActive']);
+            this.settings = result as ContentExtensionSettings;
+            
+            if (this.settings.cameraActive) {
+                this.startCamera();
+            }
+        } catch (error) {
+            console.error('設定の読み込みに失敗:', error);
+        }
+    }
+
+    private async startCamera(): Promise<void> {
+        if (this.isActive) return;
+
+        try {
+            this.createOverlay();
+            await this.setupCamera();
+            await this.initializeHandDetection();
+            this.isActive = true;
+        } catch (error) {
+            console.error('カメラの開始に失敗:', error);
+            this.removeOverlay();
+        }
+    }
+
+    private async stopCamera(): Promise<void> {
+        if (!this.isActive) return;
+
+        this.isActive = false;
+        
+        // タイマーを停止
+        this.stopHandDetectionTimer();
+        
+        // オフスクリーンドキュメントに停止通知
+        try {
+            await chrome.runtime.sendMessage({
+                action: 'stopHandDetection'
+            });
+        } catch (error) {
+            console.error('Failed to stop hand detection:', error);
+        }
+
+        // メディアストリームを停止
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
+        }
+        
+        if (this.video) {
+            this.video.srcObject = null;
+        }
+
+        this.removeOverlay();
+    }
+
+    private async initializeHandDetection(): Promise<void> {
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: 'initializeHandDetection'
+            });
+            
+            if (response.success) {
+                console.log('Hand detection initialized via offscreen document');
+            } else {
+                throw new Error(response.error || 'Failed to initialize hand detection');
+            }
+        } catch (error) {
+            console.error('Failed to initialize hand detection:', error);
+        }
+    }
+
+    private handleHandDetectionResults(results: HandDetectionResult): void {
+        console.log('Received hand detection results in content script:', {
+            handCount: results.hands ? results.hands.length : 0,
+            timestamp: results.timestamp,
+            canvasSize: this.canvas ? `${this.canvas.width}x${this.canvas.height}` : 'no canvas'
+        });
+
+        // キャンバスをクリア
+        if (this.ctx && this.canvas) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        if (!results.hands || results.hands.length === 0) {
+            if (this.gestureOutput) {
+                this.gestureOutput.textContent = '検知中...';
+            }
+            console.log('No hands detected - clearing canvas');
+            return;
+        }
+
+        console.log('Processing', results.hands.length, 'detected hands');
+
+        // 手が検知された場合の処理
+        for (let i = 0; i < results.hands.length; i++) {
+            const landmarks = results.hands[i];
+            const handedness = results.handedness[i]?.label || 'Unknown';
+
+            console.log(`Processing hand ${i + 1}:`, {
+                landmarkCount: landmarks ? landmarks.length : 0,
+                handedness: handedness,
+                firstLandmark: landmarks && landmarks.length > 0 ? landmarks[0] : 'none'
+            });
+
+            if (landmarks && landmarks.length > 0) {
+                // 手の描画を先に実行
+                this.drawLandmarks(landmarks);
+
+                // ジェスチャーを検知
+                const gesture = this.detectGesture(landmarks);
+                if (gesture) {
+                    console.log('Gesture detected in content script:', gesture);
+                    this.displayGesture(gesture, handedness);
+                    this.executeGestureAction(gesture);
+                }
+            } else {
+                console.warn('Invalid landmarks data for hand', i + 1);
+            }
+        }
+    }
+
+    private createOverlay(): void {
+        // オーバーレイコンテナを作成
+        this.overlay = document.createElement('div');
+        this.overlay.id = 'gesture-call-overlay';
+        this.overlay.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 240px;
+            height: 160px;
+            z-index: 10000;
+            border: 2px solid #007cba;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: black;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        `;
+
+        // ビデオ要素を作成
+        this.video = document.createElement('video');
+        this.video.style.cssText = `
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        `;
+        this.video.autoplay = true;
+        this.video.playsInline = true;
+        this.video.muted = true;
+
+        // キャンバス要素を作成
+        this.canvas = document.createElement('canvas');
+        this.canvas.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        `;
+        this.ctx = this.canvas.getContext('2d');
+
+        // ジェスチャー出力要素を作成
+        this.gestureOutput = document.createElement('div');
+        this.gestureOutput.style.cssText = `
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            right: 5px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px;
+            font-size: 12px;
+            text-align: center;
+            border-radius: 3px;
+            font-family: Arial, sans-serif;
+        `;
+        this.gestureOutput.textContent = '検知中...';
+
+        // 要素を組み立て
+        this.overlay.appendChild(this.video);
+        this.overlay.appendChild(this.canvas);
+        this.overlay.appendChild(this.gestureOutput);
+
+        // ページに追加
+        document.body.appendChild(this.overlay);
+    }
+
+    private removeOverlay(): void {
+        if (this.overlay) {
+            document.body.removeChild(this.overlay);
+            this.overlay = null;
+            this.video = null;
+            this.canvas = null;
+            this.ctx = null;
+            this.gestureOutput = null;
+        }
+    }
+
+
+    private async setupCamera(): Promise<void> {
+        if (!this.video) throw new Error('Video element not found');
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    width: 240, 
+                    height: 160,
+                    facingMode: 'user'
+                }
+            });
+
+            this.mediaStream = stream;
+            this.video.srcObject = stream;
+            
+            return new Promise((resolve, reject) => {
+                if (!this.video) {
+                    reject(new Error('Video element is null'));
+                    return;
+                }
+                
+                this.video.addEventListener('loadedmetadata', () => {
+                    this.resizeCanvas();
+                    
+                    // ジェスチャ検知用のタイマーを設定
+                    this.startHandDetectionTimer();
+                    
+                    console.log('Camera setup completed - video is playing');
+                    resolve(void 0);
+                });
+
+                this.video.addEventListener('error', reject);
+            });
+
+        } catch (error) {
+            console.error('カメラアクセスエラー:', error);
+            throw error;
+        }
+    }
+
+    private startHandDetectionTimer(): void {
+        if (this.detectionTimer) {
+            clearInterval(this.detectionTimer);
+        }
+        
+        this.detectionTimer = window.setInterval(() => {
+            if (this.isActive && this.video) {
+                console.log('Processing hand detection frame at:', new Date().toLocaleTimeString());
+                this.captureFrameAndSendToOffscreen();
+            }
+        }, this.PROCESS_INTERVAL);
+        
+        console.log('Hand detection timer started with interval:', this.PROCESS_INTERVAL);
+    }
+
+    private stopHandDetectionTimer(): void {
+        if (this.detectionTimer) {
+            clearInterval(this.detectionTimer);
+            this.detectionTimer = null;
+            console.log('Hand detection timer stopped');
+        }
+    }
+
+    private captureFrameAndSendToOffscreen(): void {
+        if (!this.canvas || !this.ctx || !this.video) {
+            console.warn('Missing elements for frame capture:', {
+                hasCanvas: !!this.canvas,
+                hasCtx: !!this.ctx,
+                hasVideo: !!this.video
+            });
+            return;
+        }
+
+        console.log('Capturing frame - video ready:', this.video.readyState, 'video size:', this.video.videoWidth + 'x' + this.video.videoHeight);
+
+        try {
+            // ビデオフレームをCanvasに描画
+            this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+            
+            // CanvasをBase64に変換
+            const imageData = this.canvas.toDataURL('image/jpeg', 0.8);
+            
+            console.log('Frame captured, data length:', imageData.length, 'sending to offscreen...');
+            
+            // オフスクリーンドキュメントに送信
+            chrome.runtime.sendMessage({
+                action: 'processFrame',
+                imageData: imageData
+            }).then((response) => {
+                console.log('Frame processing response:', response);
+            }).catch((error) => {
+                console.warn('Failed to send frame to offscreen:', error);
+            });
+            
+        } catch (error) {
+            console.warn('Frame capture failed:', error);
+        }
+    }
+
+    private resizeCanvas(): void {
+        if (!this.canvas || !this.video) return;
+        
+        this.canvas.width = this.video.videoWidth;
+        this.canvas.height = this.video.videoHeight;
+    }
+
+    private onResults(results: HandResults): void {
+        if (!this.ctx || !this.canvas) return;
+
+        this.ctx.save();
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                const landmarks = results.multiHandLandmarks[i];
+                const handedness = results.multiHandedness[i];
+
+                // 手の骨格を描画
+                this.drawLandmarks(landmarks);
+
+                // ジェスチャーを検知してアクション実行
+                const gesture = this.detectGesture(landmarks);
+                if (gesture) {
+                    this.displayGesture(gesture, handedness.label);
+                    this.executeGestureAction(gesture);
+                }
+            }
+        } else {
+            if (this.gestureOutput) {
+                this.gestureOutput.textContent = '検知中...';
+            }
+        }
+
+        this.ctx.restore();
+    }
+
+    private drawLandmarks(landmarks: any[]): void {
+        if (!this.ctx || !landmarks || landmarks.length === 0) {
+            console.warn('Cannot draw landmarks: missing context, landmarks, or empty landmarks', {
+                hasCtx: !!this.ctx,
+                hasLandmarks: !!landmarks,
+                landmarkCount: landmarks ? landmarks.length : 0
+            });
+            return;
+        }
+
+        console.log('Attempting to draw landmarks:', {
+            landmarkCount: landmarks.length,
+            hasDrawConnectors: !!drawConnectors,
+            hasDrawLandmarks: !!drawLandmarks,
+            hasHandConnections: !!HAND_CONNECTIONS
+        });
+
+        try {
+            // キャンバスサイズを確認
+            if (this.canvas && (this.canvas.width === 0 || this.canvas.height === 0)) {
+                console.warn('Canvas has zero dimensions:', this.canvas.width, 'x', this.canvas.height);
+                return;
+            }
+
+            // 手の関節を線で描画
+            if (drawConnectors && HAND_CONNECTIONS) {
+                console.log('Drawing connectors...');
+                drawConnectors(this.ctx, landmarks, HAND_CONNECTIONS, {
+                    color: '#00FF00',
+                    lineWidth: 2
+                });
+                console.log('Connectors drawn successfully');
+            } else {
+                console.warn('Cannot draw connectors:', {
+                    hasDrawConnectors: !!drawConnectors,
+                    hasHandConnections: !!HAND_CONNECTIONS
+                });
+            }
+
+            // 手のランドマークを点で描画
+            if (drawLandmarks) {
+                console.log('Drawing landmarks...');
+                drawLandmarks(this.ctx, landmarks, {
+                    color: '#FF0000',
+                    lineWidth: 2,
+                    radius: 3
+                });
+                console.log('Landmarks drawn successfully');
+            } else {
+                console.warn('Cannot draw landmarks: drawLandmarks function not available');
+            }
+            
+            console.log('Hand landmarks drawing completed, count:', landmarks.length);
+        } catch (error) {
+            console.error('Drawing landmarks failed:', error);
+        }
+    }
+
+    private detectGesture(landmarks: Landmark[]): string | null {
+        const fingers = this.getFingersUp(landmarks);
+
+        // 手を挙げる（手のひらを開いている）
+        if (fingers.every(finger => finger === 1)) {
+            return '手を挙げました';
+        }
+
+        // 人差し指を上げる（人差し指のみ）
+        if (fingers[1] === 1 && fingers[0] === 0 && fingers[2] === 0 && fingers[3] === 0 && fingers[4] === 0) {
+            return '人差し指を上げました';
+        }
+
+        // 親指を上げる（親指のみ）
+        if (fingers[0] === 1 && fingers[1] === 0 && fingers[2] === 0 && fingers[3] === 0 && fingers[4] === 0) {
+            return '親指を上げました';
+        }
+
+        return null;
+    }
+
+    private getFingersUp(landmarks: Landmark[]): number[] {
+        const fingerTips = [4, 8, 12, 16, 20];
+        const fingerPips = [3, 6, 10, 14, 18];
+        const fingerMcp = [2, 5, 9, 13, 17];
+
+        const fingers: number[] = [];
+
+        // 親指の判定
+        const wrist = landmarks[0];
+        const thumbMcp = landmarks[2];
+        const thumbTip = landmarks[4];
+        const thumbPip = landmarks[3];
+
+        const thumbDistance = Math.abs(thumbTip.x - wrist.x);
+        const thumbMcpDistance = Math.abs(thumbMcp.x - wrist.x);
+        const thumbIsExtended = thumbDistance > thumbMcpDistance * 1.3;
+        const thumbIsUp = thumbTip.y < thumbPip.y;
+
+        if (thumbIsExtended && thumbIsUp) {
+            fingers.push(1);
+        } else {
+            fingers.push(0);
+        }
+
+        // その他の指
+        for (let i = 1; i < 5; i++) {
+            const tipY = landmarks[fingerTips[i]].y;
+            const pipY = landmarks[fingerPips[i]].y;
+            const mcpY = landmarks[fingerMcp[i]].y;
+
+            if (tipY < pipY && tipY < mcpY * 0.9) {
+                fingers.push(1);
+            } else {
+                fingers.push(0);
+            }
+        }
+
+        return fingers;
+    }
+
+    private executeGestureAction(gesture: string): void {
+        switch (gesture) {
+            case '手を挙げました':
+                // URL遷移アクション
+                if (this.settings.targetUrl) {
+                    window.location.href = this.settings.targetUrl;
+                }
+                break;
+            case '人差し指を上げました':
+                // クリックアクション
+                this.executeClickAction();
+                break;
+            case '親指を上げました':
+                // その他のアクション（将来の拡張用）
+                console.log('親指を上げるジェスチャーを検知');
+                break;
+        }
+    }
+
+    private executeClickAction(): void {
+        if (!this.settings.clickSelector) return;
+
+        try {
+            const elements = document.querySelectorAll(this.settings.clickSelector);
+            if (elements.length > 0) {
+                const element = elements[0] as HTMLElement;
+                element.click();
+                console.log(`要素をクリックしました: ${this.settings.clickSelector}`);
+            }
+        } catch (error) {
+            console.error('クリックアクションの実行に失敗:', error);
+        }
+    }
+
+    private displayGesture(gesture: string, handedness: string): void {
+        if (!this.gestureOutput) return;
+
+        const hand = handedness === 'Left' ? '左手' : '右手';
+        this.gestureOutput.textContent = `${hand}: ${gesture}`;
+        this.gestureOutput.style.backgroundColor = 'rgba(0, 255, 0, 0.8)';
+
+        setTimeout(() => {
+            if (this.gestureOutput) {
+                this.gestureOutput.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            }
+        }, 2000);
+    }
+}
+
+// コンテンツスクリプトが読み込まれたら初期化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        new ExtensionGestureDetector();
+    });
+} else {
+    new ExtensionGestureDetector();
+}
+
+})(); // 名前空間の終了

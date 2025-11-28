@@ -1,0 +1,19 @@
+{
+  "name": "gesture-call",
+  "version": "1.0.0",
+  "description": "手の動きを検知してアクションをトリガーするジェスチャー認識システム",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "dev": "npm run build && npm run watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/chrome": "^0.0.246",
+    "@types/node": "^18.15.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["gesture", "recognition", "webcam", "hand", "detection"],
+  "author": "",
+  "license": "MIT"
+}
