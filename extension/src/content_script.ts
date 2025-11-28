@@ -32,6 +32,7 @@ interface ContentExtensionSettings {
     clickSelector?: string;
     stopSelector?: string;
     cameraActive?: boolean;
+    coverVisible?: boolean;
 }
 
 interface HandDetectionResult {
@@ -45,6 +46,8 @@ class ExtensionGestureDetector {
     private canvas: HTMLCanvasElement | null = null;
     private ctx: CanvasRenderingContext2D | null = null;
     private overlay: HTMLElement | null = null;
+    private coverDiv: HTMLElement | null = null;
+    private coverStatusOutput: HTMLElement | null = null;
     private gestureOutput: HTMLElement | null = null;
     private mediaStream: MediaStream | null = null;
     private isActive = false;
@@ -81,6 +84,10 @@ class ExtensionGestureDetector {
                     this.handleHandDetectionResults(message.results);
                     sendResponse({ success: true });
                     break;
+                case 'toggleCover':
+                    this.toggleCover(message.visible);
+                    sendResponse({ success: true });
+                    break;
                 default:
                     sendResponse({ success: false, error: 'Unknown action' });
             }
@@ -99,13 +106,24 @@ class ExtensionGestureDetector {
 
     private async loadSettings(): Promise<void> {
         try {
-            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector', 'cameraActive']);
+            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector', 'cameraActive', 'coverVisible']);
             console.log('Loaded settings from storage:', result);
             this.settings = result as ContentExtensionSettings;
+            
+            // カバー表示の初期値をONに設定（未設定の場合）
+            if (this.settings.coverVisible === undefined) {
+                this.settings.coverVisible = true;
+            }
+            
             console.log('Settings applied to this.settings:', this.settings);
             
             if (this.settings.cameraActive) {
                 this.startCamera();
+            }
+            
+            // カバーの表示状態を適用
+            if (this.coverDiv !== null) {
+                this.updateCoverVisibility();
             }
         } catch (error) {
             console.error('設定の読み込みに失敗:', error);
@@ -188,6 +206,9 @@ class ExtensionGestureDetector {
             if (this.gestureOutput) {
                 this.gestureOutput.textContent = '検知中...';
             }
+            if (this.coverStatusOutput) {
+                this.coverStatusOutput.textContent = '検知中...';
+            }
             console.log('No hands detected - clearing canvas');
             return;
         }
@@ -254,6 +275,39 @@ class ExtensionGestureDetector {
         this.video.playsInline = true;
         this.video.muted = true;
 
+        // カバーdivを作成（透過度0.9）
+        this.coverDiv = document.createElement('div');
+        this.coverDiv.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            opacity: 0.9;
+            pointer-events: none;
+            z-index: 1;
+            transition: opacity 0.2s ease-in-out;
+        `;
+
+        // カバー内のステータス出力要素を作成
+        this.coverStatusOutput = document.createElement('div');
+        this.coverStatusOutput.style.cssText = `
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            right: 5px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px;
+            font-size: 12px;
+            text-align: center;
+            border-radius: 3px;
+            font-family: Arial, sans-serif;
+            z-index: 2;
+        `;
+        this.coverStatusOutput.textContent = '検知中...';
+
         // キャンバス要素を作成
         this.canvas = document.createElement('canvas');
         this.canvas.style.cssText = `
@@ -284,8 +338,16 @@ class ExtensionGestureDetector {
 
         // 要素を組み立て
         this.overlay.appendChild(this.video);
+        this.coverDiv.appendChild(this.coverStatusOutput);
+        this.overlay.appendChild(this.coverDiv);
         this.overlay.appendChild(this.canvas);
         this.overlay.appendChild(this.gestureOutput);
+        
+        // カバーの表示状態を適用（初期値はON）
+        if (this.settings.coverVisible === undefined) {
+            this.settings.coverVisible = true;
+        }
+        this.updateCoverVisibility();
 
         // マウスホバーイベントリスナーを追加
         this.overlay.addEventListener('mouseenter', () => {
@@ -311,9 +373,31 @@ class ExtensionGestureDetector {
             document.body.removeChild(this.overlay);
             this.overlay = null;
             this.video = null;
+            this.coverDiv = null;
+            this.coverStatusOutput = null;
             this.canvas = null;
             this.ctx = null;
             this.gestureOutput = null;
+        }
+    }
+
+    private toggleCover(visible?: boolean): void {
+        if (visible !== undefined) {
+            this.settings.coverVisible = visible;
+        } else {
+            this.settings.coverVisible = !this.settings.coverVisible;
+        }
+        this.updateCoverVisibility();
+    }
+
+    private updateCoverVisibility(): void {
+        if (this.coverDiv) {
+            const isVisible = this.settings.coverVisible !== false; // デフォルトはtrue
+            this.coverDiv.style.display = isVisible ? 'block' : 'none';
+            // カバーが非表示の場合は、カバーのステータスも非表示にする
+            if (this.coverStatusOutput) {
+                this.coverStatusOutput.style.display = isVisible ? 'block' : 'none';
+            }
         }
     }
 
@@ -448,6 +532,9 @@ class ExtensionGestureDetector {
         } else {
             if (this.gestureOutput) {
                 this.gestureOutput.textContent = '検知中...';
+            }
+            if (this.coverStatusOutput) {
+                this.coverStatusOutput.textContent = '検知中...';
             }
         }
 
@@ -692,12 +779,24 @@ class ExtensionGestureDetector {
         if (!this.gestureOutput) return;
 
         const hand = handedness === 'Left' ? '左手' : '右手';
-        this.gestureOutput.textContent = `${hand}: ${gesture}`;
+        const statusText = `${hand}: ${gesture}`;
+        
+        // 通常のステータス出力を更新
+        this.gestureOutput.textContent = statusText;
         this.gestureOutput.style.backgroundColor = 'rgba(0, 255, 0, 0.8)';
+
+        // カバーのステータス出力も更新
+        if (this.coverStatusOutput) {
+            this.coverStatusOutput.textContent = statusText;
+            this.coverStatusOutput.style.backgroundColor = 'rgba(0, 255, 0, 0.8)';
+        }
 
         setTimeout(() => {
             if (this.gestureOutput) {
                 this.gestureOutput.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            }
+            if (this.coverStatusOutput) {
+                this.coverStatusOutput.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
             }
         }, 2000);
     }
