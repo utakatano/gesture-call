@@ -12,19 +12,15 @@ class PopupController {
     private targetUrlInput: HTMLInputElement;
     private clickSelectorInput: HTMLInputElement;
     private stopSelectorInput: HTMLInputElement;
-    private startCameraBtn: HTMLButtonElement;
-    private stopCameraBtn: HTMLButtonElement;
-    private cameraStatus: HTMLElement;
-    private coverVisibleCheckbox: HTMLInputElement;
+    private toggleCameraBtn: HTMLButtonElement;
+    private privacyModeCheckbox: HTMLInputElement;
 
     constructor() {
         this.targetUrlInput = document.getElementById('targetUrl') as HTMLInputElement;
         this.clickSelectorInput = document.getElementById('clickSelector') as HTMLInputElement;
         this.stopSelectorInput = document.getElementById('stopSelector') as HTMLInputElement;
-        this.startCameraBtn = document.getElementById('startCamera') as HTMLButtonElement;
-        this.stopCameraBtn = document.getElementById('stopCamera') as HTMLButtonElement;
-        this.cameraStatus = document.getElementById('cameraStatus')!
-        this.coverVisibleCheckbox = document.getElementById('coverVisible') as HTMLInputElement;
+        this.toggleCameraBtn = document.getElementById('toggleCamera') as HTMLButtonElement;
+        this.privacyModeCheckbox = document.getElementById('coverVisible') as HTMLInputElement;
 
         this.initialize();
     }
@@ -47,11 +43,10 @@ class PopupController {
         this.stopSelectorInput.addEventListener('blur', () => this.saveSettings());
 
         // カメラ制御ボタン
-        this.startCameraBtn.addEventListener('click', () => this.startCamera());
-        this.stopCameraBtn.addEventListener('click', () => this.stopCamera());
+        this.toggleCameraBtn.addEventListener('click', () => this.toggleCamera());
 
-        // カバー表示の切り替え
-        this.coverVisibleCheckbox.addEventListener('change', () => this.toggleCover());
+        // プライバシーモードの切り替え
+        this.privacyModeCheckbox.addEventListener('change', () => this.togglePrivacyMode());
     }
 
     private async loadSettings(): Promise<void> {
@@ -68,13 +63,13 @@ class PopupController {
             if (coverVisibleWasUndefined) {
                 result.coverVisible = true;
             }
-            this.coverVisibleCheckbox.checked = result.coverVisible;
+            this.privacyModeCheckbox.checked = result.coverVisible;
             
             console.log('Input values set to:', {
                 targetUrl: this.targetUrlInput.value,
                 clickSelector: this.clickSelectorInput.value,
                 stopSelector: this.stopSelectorInput.value,
-                coverVisible: this.coverVisibleCheckbox.checked
+                coverVisible: this.privacyModeCheckbox.checked
             });
             
             // 初期値が設定された場合は自動保存
@@ -93,7 +88,7 @@ class PopupController {
                 targetUrl: this.targetUrlInput.value,
                 clickSelector: this.clickSelectorInput.value,
                 stopSelector: this.stopSelectorInput.value,
-                coverVisible: this.coverVisibleCheckbox.checked
+                coverVisible: this.privacyModeCheckbox.checked
             };
 
             console.log('Saving settings:', settings);
@@ -108,9 +103,9 @@ class PopupController {
         }
     }
 
-    private async toggleCover(): Promise<void> {
+    private async togglePrivacyMode(): Promise<void> {
         try {
-            const visible = this.coverVisibleCheckbox.checked;
+            const visible = this.privacyModeCheckbox.checked;
             await this.saveSettings();
             
             // アクティブなタブを取得
@@ -118,19 +113,23 @@ class PopupController {
             const activeTab = tabs[0];
 
             if (activeTab.id) {
-                // コンテンツスクリプトにカバー表示状態を送信
+                // コンテンツスクリプトにプライバシーモード状態を送信
                 await chrome.tabs.sendMessage(activeTab.id, {
                     action: 'toggleCover',
                     visible: visible
                 });
             }
         } catch (error) {
-            console.error('カバー表示の切り替えに失敗:', error);
+            console.error('プライバシーモードの切り替えに失敗:', error);
         }
     }
 
-    private async startCamera(): Promise<void> {
+    private async toggleCamera(): Promise<void> {
         try {
+            // 現在の状態を取得
+            const result = await chrome.storage.sync.get(['cameraActive']);
+            const isActive = result.cameraActive || false;
+
             // アクティブなタブを取得
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             const activeTab = tabs[0];
@@ -139,43 +138,24 @@ class PopupController {
                 throw new Error('アクティブなタブが見つかりません');
             }
 
-            // コンテンツスクリプトにカメラ開始を指示
-            await chrome.tabs.sendMessage(activeTab.id, {
-                action: 'startCamera'
-            });
-
-            // 設定を保存
-            await chrome.storage.sync.set({ cameraActive: true });
-            
-            await this.updateStatus();
-        } catch (error) {
-            console.error('カメラ開始に失敗:', error);
-            this.showError('カメラの開始に失敗しました');
-        }
-    }
-
-    private async stopCamera(): Promise<void> {
-        try {
-            // アクティブなタブを取得
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            const activeTab = tabs[0];
-
-            if (!activeTab.id) {
-                throw new Error('アクティブなタブが見つかりません');
+            if (isActive) {
+                // カメラ停止
+                await chrome.tabs.sendMessage(activeTab.id, {
+                    action: 'stopCamera'
+                });
+                await chrome.storage.sync.set({ cameraActive: false });
+            } else {
+                // カメラ開始
+                await chrome.tabs.sendMessage(activeTab.id, {
+                    action: 'startCamera'
+                });
+                await chrome.storage.sync.set({ cameraActive: true });
             }
-
-            // コンテンツスクリプトにカメラ停止を指示
-            await chrome.tabs.sendMessage(activeTab.id, {
-                action: 'stopCamera'
-            });
-
-            // 設定を保存
-            await chrome.storage.sync.set({ cameraActive: false });
             
             await this.updateStatus();
         } catch (error) {
-            console.error('カメラ停止に失敗:', error);
-            this.showError('カメラの停止に失敗しました');
+            console.error('カメラの切り替えに失敗:', error);
+            this.showError('カメラの切り替えに失敗しました');
         }
     }
 
@@ -184,20 +164,20 @@ class PopupController {
             const result = await chrome.storage.sync.get(['cameraActive']);
             const isActive = result.cameraActive || false;
 
-            this.cameraStatus.textContent = isActive ? 'カメラ動作中' : 'カメラ停止中';
-            this.cameraStatus.className = `status ${isActive ? 'active' : 'inactive'}`;
-
-            // ボタンの状態を更新
-            this.startCameraBtn.disabled = isActive;
-            this.stopCameraBtn.disabled = !isActive;
+            // ボタンのテキストとスタイルを更新
+            this.toggleCameraBtn.textContent = isActive ? 'カメラ停止' : 'カメラ開始';
+            this.toggleCameraBtn.className = isActive ? 'btn btn-danger' : 'btn btn-primary';
         } catch (error) {
             console.error('ステータス更新に失敗:', error);
         }
     }
 
     private showError(message: string): void {
-        this.cameraStatus.textContent = message;
-        this.cameraStatus.className = 'status inactive';
+        // エラーをコンソールに記録
+        console.error('Error:', message);
+        
+        // ボタンを元の状態に戻す
+        this.updateStatus();
     }
 }
 

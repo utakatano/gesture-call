@@ -251,8 +251,8 @@ class ExtensionGestureDetector {
             position: fixed;
             top: 20px;
             right: 20px;
-            width: 240px;
-            height: 160px;
+            width: 180px;
+            height: 120px;
             z-index: 10000;
             border: 2px solid #007cba;
             border-radius: 8px;
@@ -275,7 +275,7 @@ class ExtensionGestureDetector {
         this.video.playsInline = true;
         this.video.muted = true;
 
-        // カバーdivを作成（透過度0.9）
+        // カバーdivを作成（透過度1.0 = 完全透明）
         this.coverDiv = document.createElement('div');
         this.coverDiv.style.cssText = `
             position: absolute;
@@ -284,7 +284,7 @@ class ExtensionGestureDetector {
             width: 100%;
             height: 100%;
             background-color: black;
-            opacity: 0.9;
+            opacity: 1.0;
             pointer-events: none;
             z-index: 1;
             transition: opacity 0.2s ease-in-out;
@@ -349,20 +349,6 @@ class ExtensionGestureDetector {
         }
         this.updateCoverVisibility();
 
-        // マウスホバーイベントリスナーを追加
-        this.overlay.addEventListener('mouseenter', () => {
-            if (this.overlay) {
-                this.overlay.style.opacity = '1.0';
-                this.overlay.style.pointerEvents = 'auto';
-            }
-        });
-
-        this.overlay.addEventListener('mouseleave', () => {
-            if (this.overlay) {
-                this.overlay.style.opacity = '0.2';
-                this.overlay.style.pointerEvents = 'none';
-            }
-        });
 
         // ページに追加
         document.body.appendChild(this.overlay);
@@ -408,8 +394,8 @@ class ExtensionGestureDetector {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { 
-                    width: 240, 
-                    height: 160,
+                    width: 180, 
+                    height: 120,
                     facingMode: 'user'
                 }
             });
