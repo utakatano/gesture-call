@@ -60,6 +60,7 @@ class ExtensionGestureDetector {
         this.setupMessageListener();
         this.loadSettings();
         this.setupHandDetectionResultListener();
+        this.setupUrlChangeListener();
         
         // MediaPipeライブラリの読み込みを待機
         waitForMediaPipe().then(() => {
@@ -67,6 +68,71 @@ class ExtensionGestureDetector {
         }).catch((error) => {
             console.error('Failed to load MediaPipe functions:', error);
         });
+    }
+
+    private setupUrlChangeListener(): void {
+        // URL変更を検知するためのイベントリスナー
+        let currentUrl = window.location.href;
+        
+        // popstate イベント（ブラウザの戻る/進むボタン）
+        window.addEventListener('popstate', () => {
+            this.handleUrlChange(currentUrl, window.location.href);
+            currentUrl = window.location.href;
+        });
+
+        // pushState/replaceState の検知（プログラムによるURL変更）
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function(...args) {
+            originalPushState.apply(history, args);
+            window.dispatchEvent(new CustomEvent('urlchange'));
+        };
+
+        history.replaceState = function(...args) {
+            originalReplaceState.apply(history, args);
+            window.dispatchEvent(new CustomEvent('urlchange'));
+        };
+
+        window.addEventListener('urlchange', () => {
+            this.handleUrlChange(currentUrl, window.location.href);
+            currentUrl = window.location.href;
+        });
+    }
+
+    private async handleUrlChange(oldUrl: string, newUrl: string): Promise<void> {
+        if (oldUrl === newUrl) return;
+        
+        console.log('URL changed detected:', { from: oldUrl, to: newUrl });
+        
+        // 新しいURLで自動起動チェック
+        await this.checkAndAutoStartCamera();
+    }
+
+    private isUrlAllowed(currentUrl: string, targetUrl: string): boolean {
+        if (!targetUrl) {
+            console.log('No target URL configured, allowing camera');
+            return true;
+        }
+
+        try {
+            const current = new URL(currentUrl);
+            const target = new URL(targetUrl);
+            
+            console.log('Domain check:', {
+                currentDomain: current.hostname,
+                targetDomain: target.hostname
+            });
+            
+            // 同じドメインかどうかをチェック
+            const sameDomain = current.hostname === target.hostname;
+            console.log('Same domain check result:', sameDomain);
+            
+            return sameDomain;
+        } catch (error) {
+            console.error('URL parsing error in isUrlAllowed:', error);
+            return false;
+        }
     }
 
     private setupMessageListener(): void {
@@ -117,9 +183,8 @@ class ExtensionGestureDetector {
             
             console.log('Settings applied to this.settings:', this.settings);
             
-            if (this.settings.cameraActive) {
-                this.startCamera();
-            }
+            // 遷移先URLのドメインかどうかをチェックして自動起動
+            await this.checkAndAutoStartCamera();
             
             // カバーの表示状態を適用
             if (this.coverDiv !== null) {
@@ -127,6 +192,64 @@ class ExtensionGestureDetector {
             }
         } catch (error) {
             console.error('設定の読み込みに失敗:', error);
+        }
+    }
+
+    private async checkAndAutoStartCamera(): Promise<void> {
+        try {
+            // 現在のURLと遷移先URLを比較
+            const currentUrl = window.location.href;
+            const targetUrl = this.settings.targetUrl;
+            
+            if (!targetUrl) {
+                console.log('No target URL configured, skipping auto start');
+                return;
+            }
+
+            // ドメインが一致するかチェック
+            if (this.isUrlAllowed(currentUrl, targetUrl)) {
+                console.log('Current domain matches target domain, checking camera state', {
+                    current: currentUrl,
+                    target: targetUrl
+                });
+                
+                // タブIDを取得
+                const response = await chrome.runtime.sendMessage({ action: 'getCurrentTabId' });
+                if (response.tabId) {
+                    // タブ固有の状態をチェック
+                    const result = await chrome.storage.sync.get(['cameraActiveForTabs']);
+                    const cameraActiveForTabs = result.cameraActiveForTabs || {};
+                    const isStoredAsActive = cameraActiveForTabs[response.tabId] || false;
+                    
+                    console.log('Camera state check:', {
+                        tabId: response.tabId,
+                        storedAsActive: isStoredAsActive,
+                        actuallyActive: this.isActive
+                    });
+                    
+                    // ストレージでは起動済みだが実際には動作していない場合、または
+                    // ストレージで未起動で実際にも動作していない場合に起動
+                    if (isStoredAsActive && !this.isActive) {
+                        console.log('Storage shows active but camera not running, restarting...');
+                        await this.startCamera();
+                    } else if (!isStoredAsActive && !this.isActive) {
+                        console.log('Auto-starting camera for target domain...');
+                        await this.startCamera();
+                        // タブ固有の状態を更新
+                        cameraActiveForTabs[response.tabId] = true;
+                        await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
+                    } else {
+                        console.log('Camera already in correct state, no action needed');
+                    }
+                }
+            } else {
+                console.log('Current domain does not match target domain, not auto-starting camera', {
+                    current: currentUrl,
+                    target: targetUrl
+                });
+            }
+        } catch (error) {
+            console.error('Auto start check failed:', error);
         }
     }
 
@@ -138,6 +261,7 @@ class ExtensionGestureDetector {
             await this.setupCamera();
             await this.initializeHandDetection();
             this.isActive = true;
+            console.log('Camera started successfully');
         } catch (error) {
             console.error('カメラの開始に失敗:', error);
             this.removeOverlay();
@@ -667,7 +791,24 @@ class ExtensionGestureDetector {
                     const shouldNavigate = this.shouldNavigateToUrl(currentUrl, targetUrl);
                     
                     if (shouldNavigate) {
-                        console.log('Navigating to target URL');
+                        console.log('Navigating to target URL, preserving camera state');
+                        
+                        // ページ遷移前にカメラが動作していた場合、状態を保持
+                        if (this.isActive) {
+                            try {
+                                const response = await chrome.runtime.sendMessage({ action: 'getCurrentTabId' });
+                                if (response.tabId) {
+                                    const result = await chrome.storage.sync.get(['cameraActiveForTabs']);
+                                    const cameraActiveForTabs = result.cameraActiveForTabs || {};
+                                    cameraActiveForTabs[response.tabId] = true;
+                                    await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
+                                    console.log('Camera state preserved for navigation');
+                                }
+                            } catch (error) {
+                                console.error('Failed to preserve camera state:', error);
+                            }
+                        }
+                        
                         window.location.href = targetUrl;
                     } else {
                         console.log('Already on target domain/URL, checking for click action');

@@ -6,6 +6,7 @@ interface PopupExtensionSettings {
     stopSelector: string;
     cameraActive: boolean;
     coverVisible: boolean;
+    cameraActiveForTabs: { [tabId: number]: boolean };
 }
 
 class PopupController {
@@ -126,10 +127,6 @@ class PopupController {
 
     private async toggleCamera(): Promise<void> {
         try {
-            // 現在の状態を取得
-            const result = await chrome.storage.sync.get(['cameraActive']);
-            const isActive = result.cameraActive || false;
-
             // アクティブなタブを取得
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             const activeTab = tabs[0];
@@ -138,19 +135,29 @@ class PopupController {
                 throw new Error('アクティブなタブが見つかりません');
             }
 
+            // タブ固有の現在の状態を取得
+            const result = await chrome.storage.sync.get(['cameraActiveForTabs']);
+            const cameraActiveForTabs = result.cameraActiveForTabs || {};
+            const isActive = cameraActiveForTabs[activeTab.id] || false;
+
             if (isActive) {
                 // カメラ停止
                 await chrome.tabs.sendMessage(activeTab.id, {
                     action: 'stopCamera'
                 });
-                await chrome.storage.sync.set({ cameraActive: false });
+                // このタブの状態を停止に更新
+                cameraActiveForTabs[activeTab.id] = false;
             } else {
                 // カメラ開始
                 await chrome.tabs.sendMessage(activeTab.id, {
                     action: 'startCamera'
                 });
-                await chrome.storage.sync.set({ cameraActive: true });
+                // このタブの状態を開始に更新
+                cameraActiveForTabs[activeTab.id] = true;
             }
+            
+            // タブ固有の状態を保存
+            await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
             
             await this.updateStatus();
         } catch (error) {
@@ -161,16 +168,30 @@ class PopupController {
 
     private async updateStatus(): Promise<void> {
         try {
-            const result = await chrome.storage.sync.get(['cameraActive']);
-            const isActive = result.cameraActive || false;
+            // アクティブなタブを取得
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const activeTab = tabs[0];
+
+            if (!activeTab.id) {
+                this.toggleCameraBtn.textContent = 'タブが見つかりません';
+                this.toggleCameraBtn.disabled = true;
+                return;
+            }
+
+            // タブ固有の状態を取得
+            const result = await chrome.storage.sync.get(['cameraActiveForTabs', 'targetUrl']);
+            const cameraActiveForTabs = result.cameraActiveForTabs || {};
+            const isActive = cameraActiveForTabs[activeTab.id] || false;
 
             // ボタンのテキストとスタイルを更新
             this.toggleCameraBtn.textContent = isActive ? 'カメラ停止' : 'カメラ開始';
             this.toggleCameraBtn.className = isActive ? 'btn btn-danger' : 'btn btn-primary';
+            this.toggleCameraBtn.disabled = false;
         } catch (error) {
             console.error('ステータス更新に失敗:', error);
         }
     }
+
 
     private showError(message: string): void {
         // エラーをコンソールに記録

@@ -58,6 +58,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             handleHandDetectionResults(message.results, sender).then(sendResponse);
             return true; // 非同期レスポンス
             
+        case 'getCurrentTabId':
+            handleGetCurrentTabId(sender).then(sendResponse);
+            return true; // 非同期レスポンス
+            
         default:
             console.warn('Unknown action in background script:', message.action);
             sendResponse({ success: false, error: 'Unknown action' });
@@ -147,6 +151,22 @@ async function handleHandDetectionResults(results: any, sender: chrome.runtime.M
         }
     } catch (error) {
         console.error('Failed to forward hand detection results:', error);
+        return { success: false, error: (error as Error).message };
+    }
+}
+
+async function handleGetCurrentTabId(sender: chrome.runtime.MessageSender): Promise<any> {
+    try {
+        const tabId = sender.tab?.id;
+        if (tabId) {
+            console.log('Returning tab ID:', tabId);
+            return { success: true, tabId: tabId };
+        } else {
+            console.warn('No tab ID found in sender');
+            return { success: false, error: 'No tab ID found' };
+        }
+    } catch (error) {
+        console.error('Failed to get current tab ID:', error);
         return { success: false, error: (error as Error).message };
     }
 }
