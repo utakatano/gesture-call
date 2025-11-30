@@ -33,6 +33,7 @@ interface ContentExtensionSettings {
     stopSelector?: string;
     cameraActive?: boolean;
     coverVisible?: boolean;
+    autoStart?: boolean;
 }
 
 interface HandDetectionResult {
@@ -172,7 +173,7 @@ class ExtensionGestureDetector {
 
     private async loadSettings(): Promise<void> {
         try {
-            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector', 'cameraActive', 'coverVisible']);
+            const result = await chrome.storage.sync.get(['targetUrl', 'clickSelector', 'stopSelector', 'cameraActive', 'coverVisible', 'autoStart']);
             console.log('Loaded settings from storage:', result);
             this.settings = result as ContentExtensionSettings;
             
@@ -217,27 +218,59 @@ class ExtensionGestureDetector {
                 const response = await chrome.runtime.sendMessage({ action: 'getCurrentTabId' });
                 if (response.tabId) {
                     // タブ固有の状態をチェック
-                    const result = await chrome.storage.sync.get(['cameraActiveForTabs']);
+                    const result = await chrome.storage.sync.get(['cameraActiveForTabs', 'shouldStartCameraAfterNavigation']);
                     const cameraActiveForTabs = result.cameraActiveForTabs || {};
+                    const shouldStartCameraAfterNavigation = result.shouldStartCameraAfterNavigation || {};
                     const isStoredAsActive = cameraActiveForTabs[response.tabId] || false;
+                    const shouldStartAfterNavigation = shouldStartCameraAfterNavigation[response.tabId] || false;
                     
                     console.log('Camera state check:', {
                         tabId: response.tabId,
                         storedAsActive: isStoredAsActive,
-                        actuallyActive: this.isActive
+                        actuallyActive: this.isActive,
+                        shouldStartAfterNavigation: shouldStartAfterNavigation
                     });
                     
-                    // ストレージでは起動済みだが実際には動作していない場合、または
-                    // ストレージで未起動で実際にも動作していない場合に起動
-                    if (isStoredAsActive && !this.isActive) {
-                        console.log('Storage shows active but camera not running, restarting...');
-                        await this.startCamera();
-                    } else if (!isStoredAsActive && !this.isActive) {
-                        console.log('Auto-starting camera for target domain...');
-                        await this.startCamera();
-                        // タブ固有の状態を更新
-                        cameraActiveForTabs[response.tabId] = true;
-                        await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
+                    // 遷移後の自動起動フラグがある場合、または
+                    // ストレージでは起動済みだが実際には動作していない場合に起動
+                    // ただし、自動起動設定がOFFの場合はスキップ
+                    const autoStartEnabled = this.settings.autoStart !== false; // デフォルトはtrue
+                    
+                    if ((shouldStartAfterNavigation || isStoredAsActive) && !this.isActive && autoStartEnabled) {
+                        console.log('Starting camera - reason:', shouldStartAfterNavigation ? 'after navigation' : 'stored as active');
+                        
+                        try {
+                            await this.startCamera();
+                            
+                            // タブ固有の状態を更新
+                            cameraActiveForTabs[response.tabId] = true;
+                            await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.log('Auto camera start failed (permission issue):', errorMessage);
+                            console.log('Camera will need to be started manually from popup');
+                            
+                            // カメラ起動失敗をストレージに記録
+                            cameraActiveForTabs[response.tabId] = false;
+                            await chrome.storage.sync.set({ cameraActiveForTabs: cameraActiveForTabs });
+                            
+                            // ユーザーに通知を表示
+                            this.showCameraPermissionNotice();
+                        }
+                        
+                        // フラグをクリア（成功・失敗問わず）
+                        if (shouldStartAfterNavigation) {
+                            delete shouldStartCameraAfterNavigation[response.tabId];
+                            await chrome.storage.sync.set({ shouldStartCameraAfterNavigation: shouldStartCameraAfterNavigation });
+                        }
+                    } else if (!autoStartEnabled) {
+                        console.log('Auto camera start is disabled by user setting');
+                        
+                        // フラグをクリア（自動起動しない場合も）
+                        if (shouldStartAfterNavigation) {
+                            delete shouldStartCameraAfterNavigation[response.tabId];
+                            await chrome.storage.sync.set({ shouldStartCameraAfterNavigation: shouldStartCameraAfterNavigation });
+                        }
                     } else {
                         console.log('Camera already in correct state, no action needed');
                     }
@@ -515,41 +548,55 @@ class ExtensionGestureDetector {
     private async setupCamera(): Promise<void> {
         if (!this.video) throw new Error('Video element not found');
 
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { 
-                    width: 180, 
-                    height: 120,
-                    facingMode: 'user'
-                }
-            });
+        const maxRetries = 3;
+        let lastError: Error | null = null;
 
-            this.mediaStream = stream;
-            this.video.srcObject = stream;
-            
-            return new Promise((resolve, reject) => {
-                if (!this.video) {
-                    reject(new Error('Video element is null'));
-                    return;
-                }
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`Camera setup attempt ${attempt}/${maxRetries}`);
                 
-                this.video.addEventListener('loadedmetadata', () => {
-                    this.resizeCanvas();
-                    
-                    // ジェスチャ検知用のタイマーを設定
-                    this.startHandDetectionTimer();
-                    
-                    console.log('Camera setup completed - video is playing');
-                    resolve(void 0);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        width: 180, 
+                        height: 120,
+                        facingMode: 'user'
+                    }
                 });
 
-                this.video.addEventListener('error', reject);
-            });
+                this.mediaStream = stream;
+                this.video.srcObject = stream;
+                
+                return new Promise((resolve, reject) => {
+                    if (!this.video) {
+                        reject(new Error('Video element is null'));
+                        return;
+                    }
+                    
+                    this.video.addEventListener('loadedmetadata', () => {
+                        this.resizeCanvas();
+                        
+                        // ジェスチャ検知用のタイマーを設定
+                        this.startHandDetectionTimer();
+                        
+                        console.log('Camera setup completed - video is playing');
+                        resolve(void 0);
+                    });
 
-        } catch (error) {
-            console.error('カメラアクセスエラー:', error);
-            throw error;
+                    this.video.addEventListener('error', reject);
+                });
+
+            } catch (error) {
+                lastError = error as Error;
+                console.error(`カメラアクセスエラー (attempt ${attempt}/${maxRetries}):`, error);
+                
+                if (attempt < maxRetries) {
+                    console.log(`Retrying in 1 second...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
         }
+
+        throw lastError || new Error('Camera setup failed after all retries');
     }
 
     private startHandDetectionTimer(): void {
@@ -793,6 +840,20 @@ class ExtensionGestureDetector {
                     if (shouldNavigate) {
                         console.log('Navigating to target URL, preserving camera state');
                         
+                        // 遷移後にカメラを起動するためのフラグを設定
+                        try {
+                            const response = await chrome.runtime.sendMessage({ action: 'getCurrentTabId' });
+                            if (response.tabId) {
+                                const result = await chrome.storage.sync.get(['shouldStartCameraAfterNavigation']);
+                                const shouldStartCameraAfterNavigation = result.shouldStartCameraAfterNavigation || {};
+                                shouldStartCameraAfterNavigation[response.tabId] = true;
+                                await chrome.storage.sync.set({ shouldStartCameraAfterNavigation: shouldStartCameraAfterNavigation });
+                                console.log('Camera restart flag set for tab', response.tabId);
+                            }
+                        } catch (error) {
+                            console.error('Failed to set camera restart flag:', error);
+                        }
+                        
                         // ページ遷移前にカメラが動作していた場合、状態を保持
                         if (this.isActive) {
                             try {
@@ -926,6 +987,35 @@ class ExtensionGestureDetector {
                 this.coverStatusOutput.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
             }
         }, 2000);
+    }
+
+    private showCameraPermissionNotice(): void {
+        // 通知要素を作成
+        const notice = document.createElement('div');
+        notice.style.cssText = `
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            width: 300px;
+            padding: 12px;
+            background: #ff4444;
+            color: white;
+            border-radius: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            z-index: 10001;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        `;
+        notice.textContent = 'カメラ許可が必要です。拡張機能のポップアップからカメラを開始してください。';
+        
+        document.body.appendChild(notice);
+        
+        // 5秒後に自動削除
+        setTimeout(() => {
+            if (notice.parentNode) {
+                notice.parentNode.removeChild(notice);
+            }
+        }, 5000);
     }
 
 }

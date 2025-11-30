@@ -5,159 +5,292 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gesture Call</title>
     <style>
-        body {
-            width: 300px;
-            padding: 15px;
-            font-family: Arial, sans-serif;
+        * {
             margin: 0;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        
-        .header h1 {
-            font-size: 18px;
-            margin: 0;
-            color: #333;
-        }
-        
-        .section {
-            margin-bottom: 15px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-        }
-        
-        .section h3 {
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            color: #555;
-        }
-        
-        .input-group {
-            margin-bottom: 10px;
-        }
-        
-        .input-group label {
-            display: block;
-            font-size: 12px;
-            margin-bottom: 3px;
-            color: #666;
-        }
-        
-        .input-group input {
-            width: 100%;
-            padding: 5px;
-            font-size: 12px;
-            border: 1px solid #ccc;
-            border-radius: 3px;
+            padding: 0;
             box-sizing: border-box;
         }
-        
-        .camera-controls {
+
+        body {
+            width: 320px;
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, sans-serif;
+            background-color: #F2F2F7;
+            color: #000000;
+            line-height: 1.4;
+        }
+
+        .container {
+            padding: 16px;
+        }
+
+
+        /* ジェスチャーカード */
+        .gesture-card {
+            background: #FFFFFF;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .gesture-header {
             display: flex;
-            justify-content: space-between;
-            gap: 10px;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            background: #FBFBFD;
+            border-bottom: 1px solid #F2F2F7;
         }
-        
+
+        .gesture-emoji {
+            font-size: 18px;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #F2F2F7;
+            border-radius: 6px;
+        }
+
+        .gesture-info h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #000000;
+        }
+
+        .gesture-content {
+            padding: 16px;
+        }
+
+        /* 入力フィールド */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 400;
+            color: #3C3C43;
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 15px;
+            font-family: inherit;
+            background: #FFFFFF;
+            border: 1px solid #D1D1D6;
+            border-radius: 8px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #007AFF;
+            box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: #8E8E93;
+        }
+
+        /* ボタン */
         .btn {
-            flex: 1;
-            padding: 8px;
-            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            font-family: inherit;
             border: none;
-            border-radius: 3px;
+            border-radius: 8px;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: all 0.2s ease;
+            min-height: 40px;
+            width: 100%;
         }
-        
+
         .btn-primary {
-            background-color: #007cba;
-            color: white;
+            background: #007AFF;
+            color: #FFFFFF;
         }
-        
+
         .btn-primary:hover {
-            background-color: #005a87;
+            background: #0056CC;
         }
-        
+
+        .btn-primary:active {
+            background: #004999;
+        }
+
         .btn-danger {
-            background-color: #dc3545;
-            color: white;
+            background: #FF3B30;
+            color: #FFFFFF;
         }
-        
+
         .btn-danger:hover {
-            background-color: #c82333;
+            background: #D70015;
         }
-        
+
+        .btn-danger:active {
+            background: #B8000E;
+        }
+
         .btn-secondary {
-            background-color: #6c757d;
-            color: white;
+            background: #8E8E93;
+            color: #FFFFFF;
         }
-        
+
         .btn-secondary:hover {
-            background-color: #545b62;
+            background: #6D6D70;
         }
-        
+
         .btn:disabled {
-            opacity: 0.65;
+            opacity: 0.6;
             cursor: not-allowed;
         }
-        
-        .status {
-            text-align: center;
-            padding: 8px;
+
+        .btn-full {
+            width: 100%;
+        }
+
+
+        /* チェックボックス */
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            margin-bottom: 16px;
+        }
+
+        .checkbox-wrapper {
+            position: relative;
+            width: 16px;
+            height: 16px;
+        }
+
+        .checkbox-input {
+            opacity: 0;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .checkbox-custom {
+            width: 16px;
+            height: 16px;
+            border: 1px solid #D1D1D6;
             border-radius: 3px;
-            font-size: 12px;
-            margin-top: 10px;
+            background: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
         }
-        
-        .status.active {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+
+        .checkbox-input:checked + .checkbox-custom {
+            background: #007AFF;
+            border-color: #007AFF;
         }
-        
-        .status.inactive {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+
+        .checkbox-input:checked + .checkbox-custom::after {
+            content: '✓';
+            color: #FFFFFF;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .checkbox-label {
+            font-size: 13px;
+            color: #000000;
+            font-weight: 400;
+        }
+
+
+        /* レスポンシブ調整 */
+        @media (max-height: 500px) {
+            .container {
+                padding: 12px;
+            }
+            
+            .gesture-card {
+                margin-bottom: 12px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🖐️ Gesture Call</h1>
-    </div>
-    
-    <div class="section">
-        <h3>ページ操作設定</h3>
-        <div class="input-group">
-            <label for="targetUrl">遷移先URL:</label>
-            <input type="text" id="targetUrl" placeholder="https://example.com">
+    <div class="container">
+
+        <!-- 手を挙げるジェスチャー -->
+        <div class="gesture-card">
+            <div class="gesture-header">
+                <div class="gesture-emoji">✋</div>
+                <div class="gesture-info">
+                    <h3>手を挙げる</h3>
+                </div>
+            </div>
+            <div class="gesture-content">
+                <div class="form-group">
+                    <label class="form-label" for="targetUrl">遷移先URL</label>
+                    <input type="text" id="targetUrl" class="form-input" placeholder="https://chatgpt.com/">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="clickSelector">クリック要素のセレクタ</label>
+                    <input type="text" id="clickSelector" class="form-input" placeholder="button[aria-label='音声モードを開始する']">
+                </div>
+            </div>
         </div>
-        <div class="input-group">
-            <label for="clickSelector">音声入力要素のセレクタ:</label>
-            <input type="text" id="clickSelector" placeholder=".button, #submit, button">
+
+
+        <!-- 親指を立てるジェスチャー -->
+        <div class="gesture-card">
+            <div class="gesture-header">
+                <div class="gesture-emoji">👍</div>
+                <div class="gesture-info">
+                    <h3>親指を立てる</h3>
+                </div>
+            </div>
+            <div class="gesture-content">
+                <div class="form-group">
+                    <label class="form-label" for="stopSelector">クリック要素のセレクタ</label>
+                    <input type="text" id="stopSelector" class="form-input" placeholder="button[aria-label='End voice mode']">
+                </div>
+            </div>
         </div>
-        <div class="input-group">
-            <label for="stopSelector">音声停止要素のセレクタ:</label>
-            <input type="text" id="stopSelector" placeholder="button[aria-label='End voice mode']">
+
+        <!-- カメラマスク -->
+        <div class="checkbox-group">
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="coverVisible" class="checkbox-input">
+                <div class="checkbox-custom"></div>
+            </div>
+            <label class="checkbox-label" for="coverVisible">カメラマスクを有効</label>
         </div>
-    </div>
-    
-    <div class="section">
-        <h3>カメラ制御</h3>
-        <div class="camera-controls">
-            <button id="toggleCamera" class="btn btn-primary">カメラ開始</button>
+
+        <!-- 自動起動設定 -->
+        <div class="checkbox-group">
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="autoStart" class="checkbox-input" checked>
+                <div class="checkbox-custom"></div>
+            </div>
+            <label class="checkbox-label" for="autoStart">遷移後の自動カメラ起動</label>
         </div>
-        <div class="input-group" style="margin-top: 10px;">
-            <label style="display: flex; align-items: center; cursor: pointer;">
-                <input type="checkbox" id="coverVisible" style="width: auto; margin-right: 8px;">
-                <span>プライバシーモード</span>
-            </label>
-        </div>
+
+        <!-- カメラ制御 -->
+        <button id="toggleCamera" class="btn btn-primary btn-full">カメラ開始</button>
     </div>
 
     <script src="dist/src/popup.js"></script>
