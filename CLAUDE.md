@@ -10,16 +10,16 @@
 
 Gesture Callは、MediaPipe Hand Landmarkを使用してWebカメラから手のジェスチャーを検知し、ブラウザ内でアクションを実行する完全実装済みのシステムです。以下の2つの形態で提供されています：
 
-1. **Webアプリケーション** (`simple-web/`): 全画面でジェスチャー検知を行うスタンドアロン版
-2. **Chrome拡張機能** (`extension/`): ページオーバーレイとして動作する拡張機能版
+1. **プロトタイプテストページ** (`simple-web/`): ハンドトラッキングのスモールスタートテスト用
+2. **Chrome拡張機能** (`extension/`): ページオーバーレイとして動作する実用版
 
 ## 技術アーキテクチャ
 
-### Webアプリケーション版
+### プロトタイプテストページ
 - **フロントエンド**: TypeScript + MediaPipe直接実行
 - **サーバー**: Express.js (TypeScript)
 - **カメラ**: 1280x720px全画面表示
-- **処理**: リアルタイムジェスチャー検知と描画
+- **処理**: ハンドトラッキング基礎検証
 
 ### Chrome拡張機能版
 - **Background Script**: オフスクリーンドキュメント管理、メッセージルーティング
@@ -45,7 +45,7 @@ Gesture Callは、MediaPipe Hand Landmarkを使用してWebカメラから手の
 
 ```
 gesture-call/
-├── simple-web/              # Webアプリケーション版
+├── simple-web/              # プロトタイプテストページ
 │   ├── src/
 │   │   └── gesture-detection.ts
 │   ├── libs/                # MediaPipeライブラリ
@@ -73,7 +73,7 @@ gesture-call/
 npm run build               # 全体ビルド
 ```
 
-### Webアプリケーション
+### プロトタイプテストページ
 ```bash
 cd simple-web
 npm start                  # http://localhost:3000

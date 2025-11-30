@@ -4,28 +4,28 @@
 
 ## 概要
 
-Gesture Callは、MediaPipe Hand Landmarkを使用してWebカメラから手のジェスチャーを認識し、ブラウザ内で様々なアクションを実行するシステムです。WebアプリケーションとChrome拡張機能の2つの形態で提供されます。
+Gesture Callは、MediaPipe Hand Landmarkを使用してWebカメラから手のジェスチャーを認識し、ブラウザ内で様々なアクションを実行するシステムです。プロトタイプのテストページとChrome拡張機能で構成されています。
 
 ## 特徴
 
 - **リアルタイム手の検知**: MediaPipeを使用した高精度な手の認識
 - **複数のジェスチャー対応**: 手を挙げる、人差し指、親指のジェスチャーを認識
 - **CSP準拠**: Chrome拡張機能のContent Security Policy制約内で動作
-- **デュアルプラットフォーム**: WebアプリケーションとChrome拡張機能で利用可能
+- **段階的開発**: プロトタイプテストからChrome拡張機能まで対応
 - **オフスクリーン処理**: Chrome拡張機能ではオフスクリーンドキュメントでMediaPipe処理を実行
 
 ## プロジェクト構成
 
 ```
 gesture-call/
-├── simple-web/           # Webアプリケーション版
+├── simple-web/           # プロトタイプテストページ
 │   ├── src/
 │   │   └── gesture-detection.ts
 │   ├── libs/            # MediaPipeライブラリ
-│   ├── index.html       # メイン画面
+│   ├── index.html       # テスト用単一ページ
 │   └── server.ts        # ローカルサーバー
 │
-├── extension/           # Chrome拡張機能版  
+├── extension/           # Chrome拡張機能（本体）
 │   ├── src/
 │   │   ├── background.ts      # Background Script
 │   │   ├── content_script.ts  # Content Script
@@ -51,12 +51,13 @@ gesture-call/
 
 ## システムアーキテクチャ
 
-### Webアプリケーション版
+### プロトタイプテストページ（simple-web）
+- スモールスタートとしてのハンドトラッキングテスト
 - フロントエンドでMediaPipeを直接実行
 - カメラ映像を全画面表示
-- リアルタイムでジェスチャー検知と描画
+- ジェスチャー検知ロジックの検証用
 
-### Chrome拡張機能版
+### Chrome拡張機能（extension）
 - **Background Script**: オフスクリーンドキュメント管理、メッセージルーティング
 - **Content Script**: カメラ表示、ユーザーインターフェース、アクション実行
 - **Offscreen Document**: MediaPipe処理、手の検知処理
@@ -99,7 +100,7 @@ npm install
 npm run build
 ```
 
-#### Webアプリケーション版の起動
+#### プロトタイプテストページの起動
 
 ```bash
 cd simple-web
@@ -107,7 +108,7 @@ npm start
 # http://localhost:3000 でアクセス
 ```
 
-#### Chrome拡張機能版の導入
+#### Chrome拡張機能の導入
 
 1. `chrome://extensions/` にアクセス
 2. 「デベロッパーモード」を有効化
@@ -116,14 +117,14 @@ npm start
 
 ## 使用方法
 
-### Webアプリケーション版
+### プロトタイプテストページ
 
 1. ローカルサーバーを起動
 2. ブラウザで http://localhost:3000 にアクセス
 3. カメラ許可を与える
-4. 手をかざしてジェスチャーを実行
+4. 手をかざしてジェスチャーテストを実行
 
-### Chrome拡張機能版
+### Chrome拡張機能
 
 1. 拡張機能アイコンをクリックしてポップアップを開く
 2. 「カメラ開始」ボタンをクリック
