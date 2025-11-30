@@ -221,14 +221,3 @@ private detectGesture(landmarks: Landmark[]): string | null {
      - `"Hand detection results in offscreen"`
      - `"Hand landmarks drawn successfully"`
 
-## 貢献
-
-プルリクエストや Issue の報告を歓迎します。
-
-## 今後の改善予定
-
-- [ ] より多様なジェスチャーパターンの対応
-- [ ] パフォーマンスの最適化
-- [ ] UI/UXの改善
-- [ ] 設定のカスタマイズ機能拡張
-- [ ] エラーハンドリングの強化
