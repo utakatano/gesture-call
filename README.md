@@ -38,8 +38,7 @@ gesture-call/
 │
 └── docs/                # ドキュメント
     ├── architecture.md  # アーキテクチャ設計
-    ├── install.md       # インストールガイド
-    └── tasks.md         # 開発タスク
+    └── screen.md        # UI設計資料
 ```
 
 ## 対応ジェスチャー
@@ -79,11 +78,9 @@ Offscreen Document → Background Script → Content Script
 
 ## インストール
 
-詳細なインストール手順は [docs/install.md](docs/install.md) を参照してください。
-
 ### 前提条件
 
-- Node.js (v14以上)
+- Node.js (v22以上)
 - npm
 - Chrome ブラウザ
 - Webカメラ
@@ -145,9 +142,26 @@ npm run build
 
 Chrome拡張機能のデバッグ方法：
 
-1. Content Script: ページのデベロッパーツール
-2. Background Script: `chrome://extensions/` の「Service Worker」をクリック  
-3. Offscreen Document: `chrome://extensions/` の「offscreen.html」をクリック
+1. **Content Script**: ページのデベロッパーツール
+2. **Background Script**: `chrome://extensions/` の「Service Worker」をクリック  
+3. **Offscreen Document**: `chrome://extensions/` の「offscreen.html」をクリック
+
+### 新しいジェスチャーの追加
+
+```typescript
+// src/gesture-detection.ts または offscreen.ts
+private detectGesture(landmarks: Landmark[]): string | null {
+    const fingers = this.getFingersUp(landmarks);
+    
+    // 2本指の例 (人差し指 + 中指)
+    if (fingers[1] === 1 && fingers[2] === 1 && 
+        fingers[0] === 0 && fingers[3] === 0 && fingers[4] === 0) {
+        return '2本指を上げました';
+    }
+    
+    return null;
+}
+```
 
 ### アーキテクチャ詳細
 
@@ -160,15 +174,51 @@ Chrome拡張機能のデバッグ方法：
 1. **カメラが表示されない**
    - ブラウザのカメラ許可を確認
    - HTTPSまたはlocalhostでアクセスしているか確認
+   - Chrome設定でカメラアクセスが許可されているか確認: `chrome://settings/content/camera`
 
 2. **手の検知ができない**
    - 明るい環境で試行
    - 手を明確に映す
    - カメラの解像度を確認
+   - MediaPipeファイルが正しく読み込まれているか確認
 
 3. **拡張機能が動作しない**
    - 拡張機能を再読み込み
    - デベロッパーツールでエラーログを確認
+   - manifest.jsonの構文エラーを確認
+
+4. **依存関係のインストールエラー**
+   ```bash
+   # npmキャッシュをクリア
+   npm cache clean --force
+   
+   # Node.jsバージョン確認（v22以上必要）
+   node --version
+   
+   # package-lock.jsonを削除して再インストール
+   rm package-lock.json
+   npm install
+   ```
+
+5. **TypeScriptコンパイルエラー**
+   ```bash
+   # プロジェクト依存関係を再インストール
+   npm ci
+   
+   # Chrome拡張機能型定義が不足している場合
+   npm install @types/chrome --save-dev
+   
+   # ローカルTypeScriptでコンパイル確認
+   npx tsc --noEmit
+   ```
+
+6. **手の描画が表示されない**
+   - 照明条件を改善（明るい環境で試行）
+   - 手をカメラに明確に映すように調整
+   - デベロッパーツールで以下のログを確認：
+     - `"MediaPipe drawing functions loaded successfully"`
+     - `"Hand detection results in offscreen"`
+     - `"Hand landmarks drawn successfully"`
 
 ## ライセンス
 
